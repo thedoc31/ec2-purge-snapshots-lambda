@@ -1,6 +1,7 @@
 from __future__ import print_function
 from datetime import timedelta
 from dateutil import parser, relativedelta, tz
+from collections import defaultdict
 from boto3 import resource
 
 # You must populate either the VOLUMES variable or the
@@ -191,13 +192,18 @@ def main(event, context):
             else:
                 print("No snapshots found with volume id: {}".format(volume))
     elif TAGS and not VOLUMES:
-        tag_counts = {}
         tag_string = " ".join("{}={}".format(key, val) for
                                             (key, val) in TAGS.iteritems())
         snapshots = get_tag_snaps(ec2, event['account'])
         if snapshots:
-            purge_snapshots(tag_string, snapshots, tag_counts)
-            print_summary(tag_counts)
+            print("{} snapshots found with tags: {}".format(len(snapshots), tag_string))
+            snaps_by_volume = defaultdict(list)
+            for snap in snapshots:
+                snaps_by_volume[snap.volume_id].append(snap)
+            for volume in snaps_by_volume:
+                volume_counts = {}
+                purge_snapshots(volume, snaps_by_volume[volume], volume_counts)
+                print_summary(volume_counts)
         else:
             print("No snapshots found with tags: {}".format(tag_string))
     else:
