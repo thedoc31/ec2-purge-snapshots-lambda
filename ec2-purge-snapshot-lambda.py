@@ -1,8 +1,9 @@
 from __future__ import print_function
-from datetime import timedelta
+from datetime import datetime, timedelta
 from dateutil import parser, relativedelta, tz
 from collections import defaultdict
 from boto3 import resource
+import os
 
 # You must populate either the VOLUMES variable or the
 # TAGS variable, but not both.
@@ -17,23 +18,19 @@ VOLUMES = []
 TAGS = {}
 
 # The number of hours to keep ALL snapshots
-HOURS = 0
+HOURS = int(os.environ['HOURS'])
 
 # The number of days to keep ONE snapshot per day
-DAYS = 0
+DAYS = int(os.environ['DAYS'])
 
 # The number of weeks to keep ONE snapshot per week
-WEEKS = 0
+WEEKS = int(os.environ['WEEKS'])
 
 # The number of months to keep ONE snapshot per month
-MONTHS = 0
-
-# AWS region in which the snapshots exist
-REGION = "us-east-1"
+MONTHS = int(os.environ['MONTHS'])
 
 # The timezone in which daily snapshots will be kept at midnight
-TIMEZONE = "UTC"
-
+TIMEZONE = os.environ['TIMEZONE']
 
 def purge_snapshots(id, snaps, counts):
     newest = snaps[-1]
@@ -172,7 +169,13 @@ def main(event, context):
     global NOOP
     global NOT_REALLY_STR
 
-    NOW = parser.parse(event['time']).astimezone(tz.gettz(TIMEZONE))
+    print("lambda arn:{}".format(context.invoked_function_arn))
+    ACCOUNT_ID = context.invoked_function_arn.split(":")[4]
+    print("Account ID={}\n".format(ACCOUNT_ID))
+    REGION = context.invoked_function_arn.split(":")[3]
+    print("Region={}\n".format(REGION))
+
+    NOW = datetime.now(tz.gettz(TIMEZONE))
     START_WEEKS_AFTER = HOURS + (DAYS * 24)
     START_MONTHS_AFTER = START_WEEKS_AFTER + (WEEKS * 24 * 7)
     DELETE_BEFORE_DATE = ((NOW - timedelta(hours=START_MONTHS_AFTER)) -
@@ -181,11 +184,13 @@ def main(event, context):
     NOOP = event['noop'] if 'noop' in event else False
     NOT_REALLY_STR = " (not really)" if NOOP is not False else ""
     ec2 = resource("ec2", region_name=REGION)
+    # Get the current account ID and assign it to a variable
+
 
     if VOLUMES and not TAGS:
         for volume in VOLUMES:
             volume_counts = {}
-            snapshots = get_vol_snaps(ec2, event['account'], volume)
+            snapshots = get_vol_snaps(ec2, ACCOUNT_ID, volume)
             if snapshots:
                 purge_snapshots(volume, snapshots, volume_counts)
                 print_summary(volume_counts)
@@ -194,7 +199,7 @@ def main(event, context):
     elif TAGS and not VOLUMES:
         tag_string = " ".join("{}={}".format(key, val) for
                                             (key, val) in TAGS.iteritems())
-        snapshots = get_tag_snaps(ec2, event['account'])
+        snapshots = get_tag_snaps(ec2, ACCOUNT_ID)
         if snapshots:
             print("{} snapshots found with tags: {}".format(len(snapshots), tag_string))
             snaps_by_volume = defaultdict(list)
